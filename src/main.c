@@ -4,17 +4,45 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <time.h>
 #include <unistd.h>
+
+static int n_ants;
+static int n_food;
+static int max_seconds;
+
+static void print_usage(char **argv)
+{
+    fprintf(stderr, "Usage: %s n_ants n_food max_seconds\n", argv[0]);
+}
 
 int main(int argc, char **argv)
 {
     srand(time(NULL));
 
+    if (argc != 4) {
+        print_usage(argv);
+        return 1;
+    }
+    if (sscanf(argv[1], "%d", &n_ants) != 1) {
+        print_usage(argv);
+        return 1;
+    }
+    if (sscanf(argv[2], "%d", &n_food) != 1) {
+        print_usage(argv);
+        return 1;
+    }
+    if (sscanf(argv[3], "%d", &max_seconds) != 1) {
+        print_usage(argv);
+        return 1;
+    }
+
     //////////////////////////////
-    // Fills the grid randomly to have somthing to draw on screen.
+    // Fills the grid randomly to have something to draw on screen.
     // Empty spaces have to be -.
     // You should get the number of ants and foods from the arguments 
-    // and make sure that a food and an ant does not placed at the same cell.
+    // and make sure that a food and an ant does not get placed at the same cell.
     // You must use putCharTo() and lookCharAt() to access/change the grid.
     // You should be delegating ants to separate threads
     int i,j;
