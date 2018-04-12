@@ -5,6 +5,7 @@ CFLAGS=-Wall -Wextra -std=gnu11 -pedantic -lncurses -pthread -ggdb -Og
 all: hw2
 
 hw2: main.o util.o util.h
+	$(CC) $(CFLAGS) main.o util.o -o hw2
 
 main.o: main.c util.h
 
