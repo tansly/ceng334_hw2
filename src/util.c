@@ -1,71 +1,23 @@
-#ifndef do_not_submit
-#define do_not_submit
-#include <stdio.h>
-#include <stdlib.h>
+#include "util.h"
+
 #include <curses.h>
 #include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
+#include <unistd.h>
 
-//////////////////////////////////////////
-// things you can access
-#define GRIDSIZE 30
-#define DRAWDELAY 50000
-void setDelay(int d);
-int getDelay();
-void setSleeperN(int d);
-int getSleeperN();
-void putCharTo(int i, int j, char c);
-char lookCharAt(int i, int j);
-void startCurses();
-void endCurses();
-void drawWindow();
-//////////////////////////////////////////
+static char grid[GRIDSIZE][GRIDSIZE];
+static int delay_n = 50;
+static int sleeper_n = 0;
+static long actions[GRIDSIZE][GRIDSIZE];
+static long prev_actions = 0;
+static struct timespec time_pre;
+static WINDOW *gridworld = NULL;
+static int offsetx, offsety;
 
-//////////////////////////////////////////
-// things you must not access
-char grid[GRIDSIZE][GRIDSIZE];
-int delay_n = 50;
-int sleeper_n = 0;
-long actions[GRIDSIZE][GRIDSIZE];
-long prev_actions = 0;
-struct timespec time_pre;
-WINDOW *gridworld = NULL;
-#define ESC 27
-int offsetx, offsety;
-
-void setDelay(int d) {
-    if (d >= 0) delay_n = d;
-}
-
-int getDelay() {
-    return delay_n;
-}
-
-void setSleeperN(int d) {
-    if (d >= 0) sleeper_n = d;
-}
-
-int getSleeperN() {
-    return sleeper_n;
-}
-
-void putCharTo(int i, int j, char c) {
-    actions[i][j]++;
-    grid[i][j] = c;
-    usleep(1000 + (rand() % 500));
-}
-
-char lookCharAt(int i, int j) {
-    actions[i][j]++;
-    return grid[i][j];
-}
-
-void getDimensions() {
-    offsetx = (COLS - 2*GRIDSIZE+1) / 2;
-    offsety = (LINES - GRIDSIZE) / 2;
-}
-
-void initCurses(){
+static void initCurses()
+{
     initscr();
     cbreak();
     noecho();
@@ -75,7 +27,47 @@ void initCurses(){
     refresh();
 }
 
-void startCurses() {
+static void getDimensions()
+{
+    offsetx = (COLS - 2*GRIDSIZE+1) / 2;
+    offsety = (LINES - GRIDSIZE) / 2;
+}
+
+void setDelay(int d)
+{
+    if (d >= 0) delay_n = d;
+}
+
+int getDelay()
+{
+    return delay_n;
+}
+
+void setSleeperN(int d)
+{
+    if (d >= 0) sleeper_n = d;
+}
+
+int getSleeperN()
+{
+    return sleeper_n;
+}
+
+void putCharTo(int i, int j, char c)
+{
+    actions[i][j]++;
+    grid[i][j] = c;
+    usleep(1000 + (rand() % 500));
+}
+
+char lookCharAt(int i, int j)
+{
+    actions[i][j]++;
+    return grid[i][j];
+}
+
+void startCurses()
+{
     initCurses();
     
     getDimensions();
@@ -87,7 +79,8 @@ void startCurses() {
         }
 }
 
-void endCurses() {
+void endCurses()
+{
     erase();
     refresh();
     if (gridworld != NULL) delwin(gridworld);
@@ -96,9 +89,8 @@ void endCurses() {
     endwin();
 }
 
-
-
-void drawWindow() {
+void drawWindow()
+{
     
     if (COLS > 90 && LINES > 40){
         getDimensions();
@@ -177,5 +169,3 @@ void drawWindow() {
     }
     
 }
-
-#endif

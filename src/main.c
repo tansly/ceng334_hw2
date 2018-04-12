@@ -1,8 +1,13 @@
-#include "do_not_submit.h"
+#include "util.h"
+
+#include <curses.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <stdlib.h>
+#include <unistd.h>
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv)
+{
     srand(time(NULL));
 
     //////////////////////////////
