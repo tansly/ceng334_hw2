@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Wall -Wextra -std=gnu11 -pedantic -lncurses -pthread -ggdb -Og
+CFLAGS=-Wall -Wextra -std=gnu11 -pedantic -lncurses -lpthread
 
 .PHONY: all
 all: hw2
