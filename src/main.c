@@ -32,6 +32,11 @@ pthread_cond_t sleeper_cond = PTHREAD_COND_INITIALIZER;
 /* Global grid lock. Will implement finer-grained locking later.
  */
 pthread_mutex_t grid_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Variable that signals the threads to continue or stop and the
+ * mutex to protect it.
+ */
+pthread_mutex_t running_lock = PTHREAD_MUTEX_INITIALIZER;
+int running = 1;
 
 void *ant_main(void *arg)
 {
@@ -40,8 +45,7 @@ void *ant_main(void *arg)
     int id = *(int*)arg;
     free(arg);
 
-    /* Find somewhere to sit.
-     */
+    /* Find somewhere to sit. */
     pthread_mutex_lock(&grid_lock);
     while (i_pos = rand() % GRIDSIZE, j_pos = rand() % GRIDSIZE,
             lookCharAt(i_pos, j_pos) != REPR_EMPTY)
@@ -49,7 +53,10 @@ void *ant_main(void *arg)
     putCharTo(i_pos, j_pos, '1');
     pthread_mutex_unlock(&grid_lock);
 
-    for (;;) {
+    while (pthread_mutex_lock(&running_lock), running) {
+        pthread_mutex_unlock(&running_lock);
+
+        /* Check and sleep if necessary. */
         pthread_mutex_lock(&sleeper_lock);
         if (getSleeperN() > id) {
             assert(state == REPR_ANT || state == REPR_FOODANT);
@@ -66,6 +73,8 @@ void *ant_main(void *arg)
             pthread_cond_wait(&sleeper_cond, &sleeper_lock);
         }
         pthread_mutex_unlock(&sleeper_lock);
+
+        /* After a possible sleep */
         if (state == REPR_SLEEPANT) {
             state = REPR_ANT;
             pthread_mutex_lock(&grid_lock);
@@ -79,11 +88,9 @@ void *ant_main(void *arg)
         } else {
             assert(state == REPR_ANT);
         }
-
-        pthread_testcancel();
     }
+    pthread_mutex_unlock(&running_lock);
 
-    assert(0);
     return NULL;
 }
 
@@ -113,23 +120,23 @@ static pthread_t *ants_create(int n_ants)
 
 /* Ant threads live for the lifetime of the program.
  * Before freeing global resources, we should stop and join them.
- * (Can we get away with just detaching them in the beginning?
- * I think we cannot because there may be some threads accessing the global
- * resources before termination. We must not free them before the threads exit)
- * This function cancels and joins the threads in the given array.
+ * This function stops and joins the threads in the given array.
  */
-static void ants_cancel_join(pthread_t *threads, int n_ants)
+static void ants_stop_join(pthread_t *threads, int n_ants)
 {
     int i;
-    for (i = 0; i < n_ants; i++) {
-        if (pthread_cancel(threads[i]) != 0) {
-            perror("ants_cancel_join(): pthread_cancel()");
-            exit(EXIT_FAILURE);
-        }
-    }
+    pthread_mutex_lock(&running_lock);
+    running = 0;
+    pthread_mutex_unlock(&running_lock);
+    /* Wake all sleeping threads for them to be able to terminate.
+    */
+    pthread_mutex_lock(&sleeper_lock);
+    setSleeperN(0);
+    pthread_cond_broadcast(&sleeper_cond);
+    pthread_mutex_unlock(&sleeper_lock);
     for (i = 0; i < n_ants; i++) {
         if (pthread_join(threads[i], NULL) != 0) {
-            perror("ants_cancel_join(): pthread_join()");
+            perror("ants_stop_join(): pthread_join()");
             exit(EXIT_FAILURE);
         }
     }
@@ -218,7 +225,7 @@ int main(int argc, char **argv)
         //usleep(getDelay() * 1000 + (rand() % 5000));
     }
 
-    ants_cancel_join(ant_threads, n_ants);
+    ants_stop_join(ant_threads, n_ants);
     endCurses();
     return 0;
 }
