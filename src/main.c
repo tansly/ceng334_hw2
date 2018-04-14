@@ -87,6 +87,13 @@ void *ant_main(void *arg)
         } else {
             assert(state == REPR_ANT);
         }
+
+        /* TODO: Movement logic */
+
+        pthread_mutex_lock(&delay_lock);
+        int delay = getDelay();
+        pthread_mutex_unlock(&delay_lock);
+        usleep(delay*1000 + (rand() % 5000));
     }
     pthread_mutex_unlock(&running_lock);
 
@@ -223,10 +230,8 @@ int main(int argc, char **argv)
             pthread_cond_broadcast(&sleeper_cond);
             pthread_mutex_unlock(&sleeper_lock);
         }
-        usleep(DRAWDELAY);
 
-        // each ant thread have to sleep with code similar to this
-        //usleep(getDelay() * 1000 + (rand() % 5000));
+        usleep(DRAWDELAY);
     }
 
     ants_stop_join(ant_threads, n_ants);
