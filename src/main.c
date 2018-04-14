@@ -189,7 +189,12 @@ int main(int argc, char **argv)
     /* Ants are running. From now on, the grid must be protected.
      */
 
-    for (;;) {
+    time_t start_time;
+    time_t curr_time;
+    for (start_time = time(NULL), curr_time = time(NULL);
+            difftime(curr_time, start_time) < max_seconds;
+            curr_time = time(NULL)) {
+
         pthread_mutex_lock(&grid_lock);
         drawWindow();
         pthread_mutex_unlock(&grid_lock);
