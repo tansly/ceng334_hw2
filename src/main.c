@@ -11,7 +11,8 @@
 
 void *ant_main(void *arg)
 {
-    (void)arg;
+    int id = *(int*)arg;
+    free(arg);
 
     for (;;) {
         pthread_testcancel();
@@ -31,7 +32,12 @@ static pthread_t *ants_create(int n_ants)
     int i;
     pthread_t *threads = malloc(n_ants * sizeof *threads);
     for (i = 0; i < n_ants; i++) {
-        if (pthread_create(&threads[i], NULL, ant_main, NULL) != 0) {
+        /* If we pass &i, threads may get the wrong value if the loop
+         * goes on before they read *i. So we pass a copy of each i.
+         * The malloc'ed int is free'd by the thread that gets it.
+         */
+        int *id = malloc(sizeof *id);
+        if (pthread_create(&threads[i], NULL, ant_main, id) != 0) {
             perror("ants_create(): pthread_create()");
             exit(EXIT_FAILURE);
         }
@@ -39,6 +45,13 @@ static pthread_t *ants_create(int n_ants)
     return threads;
 }
 
+/* Ant threads live for the lifetime of the program.
+ * Before freeing global resources, we should stop and join them.
+ * (Can we get away with just detaching them in the beginning?
+ * I think we cannot because there may be some threads accessing the global
+ * resources before termination. We must not free them before the threads exit)
+ * This function cancels and joins the threads in the given array.
+ */
 static void ants_cancel_join(pthread_t *threads, int n_ants)
 {
     int i;
