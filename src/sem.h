@@ -1,7 +1,14 @@
 #ifndef SEM_H
 #define SEM_H
 
-struct semaphore;
+#include <pthread.h>
+
+struct semaphore {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int value;
+    int wakeups;
+};
 
 void semaphore_init(struct semaphore *sem, int value);
 
