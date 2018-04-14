@@ -58,6 +58,7 @@ static pthread_t *ants_create(int n_ants)
          * The malloc'ed int is free'd by the thread that gets it.
          */
         int *id = malloc(sizeof *id);
+        *id = i;
         if (pthread_create(&threads[i], NULL, ant_main, id) != 0) {
             perror("ants_create(): pthread_create()");
             exit(EXIT_FAILURE);
