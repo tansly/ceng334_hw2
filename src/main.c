@@ -15,10 +15,15 @@
 #define REPR_SLEEPANT 'S'
 #define REPR_FOODSLEEPANT '$'
 
+/* TODO: Make these static */
 /* Mutex protecting the number of sleepers,
  * i.e. the functions getSleeperN() and setSleeperN().
  */
 pthread_mutex_t sleeper_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Mutex protecting the delay value,
+ * i.e the functions getDelay() and setDelay()
+ */
+pthread_mutex_t delay_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Condition variable for the sleepers.
  * It must be broadcast (not signal) since there may be several threads waiting
  * on it but only a specific one, the one with the proper id, can continue.
@@ -28,26 +33,15 @@ pthread_cond_t sleeper_cond = PTHREAD_COND_INITIALIZER;
  */
 pthread_mutex_t grid_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* Checks the number of sleepers against the id, sleeps if necessary.
- * XXX: Where to put REPR_SLEEPANT or REPR_FOODSLEEPANT?
- */
-void ant_sleep(int id)
-{
-    pthread_mutex_lock(&sleeper_lock);
-    while (getSleeperN() > id) {
-        pthread_cond_wait(&sleeper_cond, &sleeper_lock);
-    }
-    pthread_mutex_unlock(&sleeper_lock);
-}
-
 void *ant_main(void *arg)
 {
+    char state = REPR_ANT;
+    int i_pos, j_pos;
     int id = *(int*)arg;
     free(arg);
 
     /* Find somewhere to sit.
      */
-    int i_pos, j_pos;
     pthread_mutex_lock(&grid_lock);
     while (i_pos = rand() % GRIDSIZE, j_pos = rand() % GRIDSIZE,
             lookCharAt(i_pos, j_pos) != REPR_EMPTY)
@@ -56,7 +50,36 @@ void *ant_main(void *arg)
     pthread_mutex_unlock(&grid_lock);
 
     for (;;) {
-        ant_sleep(id);
+        pthread_mutex_lock(&sleeper_lock);
+        if (getSleeperN() > id) {
+            assert(state == REPR_ANT || state == REPR_FOODANT);
+            if (state == REPR_ANT) {
+                state = REPR_SLEEPANT;
+            } else if (state == REPR_FOODANT) {
+                state = REPR_FOODSLEEPANT;
+            }
+            pthread_mutex_lock(&grid_lock);
+            putCharTo(i_pos, j_pos, state);
+            pthread_mutex_unlock(&grid_lock);
+        }
+        while (getSleeperN() > id) {
+            pthread_cond_wait(&sleeper_cond, &sleeper_lock);
+        }
+        pthread_mutex_unlock(&sleeper_lock);
+        if (state == REPR_SLEEPANT) {
+            state = REPR_ANT;
+            pthread_mutex_lock(&grid_lock);
+            putCharTo(i_pos, j_pos, state);
+            pthread_mutex_unlock(&grid_lock);
+        } else if (state == REPR_FOODSLEEPANT) {
+            state = REPR_FOODANT;
+            pthread_mutex_lock(&grid_lock);
+            putCharTo(i_pos, j_pos, state);
+            pthread_mutex_unlock(&grid_lock);
+        } else {
+            assert(state == REPR_ANT);
+        }
+
         pthread_testcancel();
     }
 
@@ -155,35 +178,39 @@ int main(int argc, char **argv)
         putCharTo(a, b, REPR_FOOD);
     }
 
+    startCurses();
     pthread_t *ant_threads = ants_create(n_ants);
     /* Ants are running. From now on, the grid must be protected.
      */
-    pthread_mutex_lock(&grid_lock);
-    startCurses();
-    pthread_mutex_unlock(&grid_lock);
 
-    // You can use following loop in your program. But pay attention to 
-    // the function calls, they do not have any access control, you 
-    // have to ensure that.
-    char c;
-    while (TRUE) {
+    for (;;) {
+        pthread_mutex_lock(&grid_lock);
         drawWindow();
+        pthread_mutex_unlock(&grid_lock);
 
-        c = 0;
-        c = getch();
-
-        if (c == 'q' || c == ESC) break;
-        if (c == '+') {
-            setDelay(getDelay()+10);
+        int c = getch();
+        if (c == 'q' || c == ESC) {
+            break;
+        } else if (c == '+') {
+            pthread_mutex_lock(&delay_lock);
+            setDelay(getDelay() + 10);
+            pthread_mutex_unlock(&delay_lock);
         }
         if (c == '-') {
-            setDelay(getDelay()-10);
+            pthread_mutex_lock(&delay_lock);
+            setDelay(getDelay() - 10);
+            pthread_mutex_unlock(&delay_lock);
         }
         if (c == '*') {
-            setSleeperN(getSleeperN()+1);
+            pthread_mutex_lock(&sleeper_lock);
+            setSleeperN(getSleeperN() + 1);
+            pthread_mutex_unlock(&sleeper_lock);
         }
         if (c == '/') {
-            setSleeperN(getSleeperN()-1);
+            pthread_mutex_lock(&sleeper_lock);
+            setSleeperN(getSleeperN() - 1);
+            pthread_cond_broadcast(&sleeper_cond);
+            pthread_mutex_unlock(&sleeper_lock);
         }
         usleep(DRAWDELAY);
 
