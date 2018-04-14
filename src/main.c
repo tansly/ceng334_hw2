@@ -37,6 +37,8 @@ static pthread_mutex_t grid_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t running_lock = PTHREAD_MUTEX_INITIALIZER;
 static int running = 1;
 
+/* TODO: Actually implement cell based locking
+ */
 /* Lock the cell at the given position. If this is the first cell to be locked,
  * also block the main thread from doing a whole grid access (i.e. drawWindow()).
  * Other cells can still be locked independently.
