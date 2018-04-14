@@ -8,6 +8,13 @@
 #include <time.h>
 #include <unistd.h>
 
+#define REPR_EMPTY '-'
+#define REPR_FOOD 'o'
+#define REPR_ANT '1'
+#define REPR_FOODANT 'P'
+#define REPR_SLEEPANT 'S'
+#define REPR_FOODSLEEPANT '$'
+
 /* Mutex protecting the number of sleepers,
  * i.e. the functions getSleeperN() and setSleeperN().
  */
@@ -17,8 +24,12 @@ pthread_mutex_t sleeper_mutex = PTHREAD_MUTEX_INITIALIZER;
  * on it but only a specific one, the one with the proper id, can continue.
  */
 pthread_cond_t sleeper_cond = PTHREAD_COND_INITIALIZER;
+/* Global grid lock. Will implement finer-grained locking later.
+ */
+pthread_mutex_t grid_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Checks the number of sleepers against the id, sleeps if necessary.
+ * XXX: Where to put REPR_SLEEPANT or REPR_FOODSLEEPANT?
  */
 void ant_sleep(int id)
 {
@@ -33,6 +44,16 @@ void *ant_main(void *arg)
 {
     int id = *(int*)arg;
     free(arg);
+
+    /* Find somewhere to sit.
+     */
+    int i_pos, j_pos;
+    pthread_mutex_lock(&grid_lock);
+    while (i_pos = rand() % GRIDSIZE, j_pos = rand() % GRIDSIZE,
+            lookCharAt(i_pos, j_pos) != REPR_EMPTY)
+        ;
+    putCharTo(i_pos, j_pos, '1');
+    pthread_mutex_unlock(&grid_lock);
 
     for (;;) {
         ant_sleep(id);
@@ -116,64 +137,30 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    pthread_t *ant_threads = ants_create(n_ants);
-    ants_cancel_join(ant_threads, n_ants);
-
-    return 0;
-
-    //////////////////////////////
-    // Fills the grid randomly to have something to draw on screen.
-    // Empty spaces have to be -.
-    // You should get the number of ants and foods from the arguments 
-    // and make sure that a food and an ant does not get placed at the same cell.
-    // You must use putCharTo() and lookCharAt() to access/change the grid.
-    // You should be delegating ants to separate threads
-    int i,j;
+    /* Initialize grid with food at random locations.
+     * We are the only thread now, so we cool.
+     */
+    int i, j;
     for (i = 0; i < GRIDSIZE; i++) {
         for (j = 0; j < GRIDSIZE; j++) {
-            putCharTo(i, j, '-');
+            putCharTo(i, j, REPR_EMPTY);
         }
     }
-    int a,b;
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < n_food; i++) {
+        int a, b;
         do {
             a = rand() % GRIDSIZE;
             b = rand() % GRIDSIZE;
-        }while (lookCharAt(a,b)!= '-');
-        putCharTo(a, b, 'P');
+        } while (lookCharAt(a, b) != REPR_EMPTY);
+        putCharTo(a, b, REPR_FOOD);
     }
-    for (i = 0; i < 5; i++) {
-        do {
-            a = rand() % GRIDSIZE;
-            b = rand() % GRIDSIZE;
-        }while (lookCharAt(a,b) != '-');
-        putCharTo(a, b, '1');
-    }
-    for (i = 0; i < 5; i++) {
-        do {
-            a = rand() % GRIDSIZE;
-            b = rand() % GRIDSIZE;
-        }while (lookCharAt(a,b) != '-');
-        putCharTo(a, b, 'o');
-    }
-    for (i = 0; i < 5; i++) {
-        do {
-            a = rand() % GRIDSIZE;
-            b = rand() % GRIDSIZE;
-        }while (lookCharAt(a,b) != '-');
-        putCharTo(a, b, 'S');
-    }
-    for (i = 0; i < 5; i++) {
-        do {
-            a = rand() % GRIDSIZE;
-            b = rand() % GRIDSIZE;
-        }while (lookCharAt(a,b) != '-');
-        putCharTo(a, b, '$');
-    }
-    //////////////////////////////
 
-    // you have to have following command to initialize ncurses.
+    pthread_t *ant_threads = ants_create(n_ants);
+    /* Ants are running. From now on, the grid must be protected.
+     */
+    pthread_mutex_lock(&grid_lock);
     startCurses();
+    pthread_mutex_unlock(&grid_lock);
 
     // You can use following loop in your program. But pay attention to 
     // the function calls, they do not have any access control, you 
@@ -204,8 +191,7 @@ int main(int argc, char **argv)
         //usleep(getDelay() * 1000 + (rand() % 5000));
     }
 
-    // do not forget freeing the resources you get
+    ants_cancel_join(ant_threads, n_ants);
     endCurses();
-
     return 0;
 }
