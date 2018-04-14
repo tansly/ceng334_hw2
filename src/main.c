@@ -18,7 +18,7 @@
 /* Mutex protecting the number of sleepers,
  * i.e. the functions getSleeperN() and setSleeperN().
  */
-pthread_mutex_t sleeper_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t sleeper_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Condition variable for the sleepers.
  * It must be broadcast (not signal) since there may be several threads waiting
  * on it but only a specific one, the one with the proper id, can continue.
@@ -33,11 +33,11 @@ pthread_mutex_t grid_lock = PTHREAD_MUTEX_INITIALIZER;
  */
 void ant_sleep(int id)
 {
-    pthread_mutex_lock(&sleeper_mutex);
+    pthread_mutex_lock(&sleeper_lock);
     while (getSleeperN() > id) {
-        pthread_cond_wait(&sleeper_cond, &sleeper_mutex);
+        pthread_cond_wait(&sleeper_cond, &sleeper_lock);
     }
-    pthread_mutex_unlock(&sleeper_mutex);
+    pthread_mutex_unlock(&sleeper_lock);
 }
 
 void *ant_main(void *arg)
