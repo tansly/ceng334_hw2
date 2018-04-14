@@ -15,28 +15,27 @@
 #define REPR_SLEEPANT 'S'
 #define REPR_FOODSLEEPANT '$'
 
-/* TODO: Make these static */
 /* Mutex protecting the number of sleepers,
  * i.e. the functions getSleeperN() and setSleeperN().
  */
-pthread_mutex_t sleeper_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t sleeper_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Mutex protecting the delay value,
  * i.e the functions getDelay() and setDelay()
  */
-pthread_mutex_t delay_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t delay_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Condition variable for the sleepers.
  * It must be broadcast (not signal) since there may be several threads waiting
  * on it but only a specific one, the one with the proper id, can continue.
  */
-pthread_cond_t sleeper_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t sleeper_cond = PTHREAD_COND_INITIALIZER;
 /* Global grid lock. Will implement finer-grained locking later.
  */
-pthread_mutex_t grid_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t grid_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Variable that signals the threads to continue or stop and the
  * mutex to protect it.
  */
-pthread_mutex_t running_lock = PTHREAD_MUTEX_INITIALIZER;
-int running = 1;
+static pthread_mutex_t running_lock = PTHREAD_MUTEX_INITIALIZER;
+static int running = 1;
 
 void *ant_main(void *arg)
 {
