@@ -37,6 +37,30 @@ static pthread_mutex_t grid_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t running_lock = PTHREAD_MUTEX_INITIALIZER;
 static int running = 1;
 
+/* Lock the cell at the given position. If this is the first cell to be locked,
+ * also block the main thread from doing a whole grid access (i.e. drawWindow()).
+ * Other cells can still be locked independently.
+ * We will implement a Lightswitch (see Downey) based pattern in order to
+ * achieve this goal.
+ */
+static void lock_cell(int i, int j)
+{
+    (void)i;
+    (void)j;
+    pthread_mutex_lock(&grid_lock);
+}
+
+/* Unlock the cell at the given position.
+ * If this is the last cell to be unlocked, also unblock the main thread
+ * from doing a whole grid access (i.e. drawWindow()).
+ */
+static void unlock_cell(int i, int j)
+{
+    (void)i;
+    (void)j;
+    pthread_mutex_unlock(&grid_lock);
+}
+
 void *ant_main(void *arg)
 {
     char state = REPR_ANT;
@@ -45,12 +69,13 @@ void *ant_main(void *arg)
     free(arg);
 
     /* Find somewhere to sit. */
-    pthread_mutex_lock(&grid_lock);
     while (i_pos = rand() % GRIDSIZE, j_pos = rand() % GRIDSIZE,
-            lookCharAt(i_pos, j_pos) != REPR_EMPTY)
-        ;
+            lock_cell(i_pos, j_pos),
+            lookCharAt(i_pos, j_pos) != REPR_EMPTY) {
+        unlock_cell(i_pos, j_pos);
+    }
     putCharTo(i_pos, j_pos, '1');
-    pthread_mutex_unlock(&grid_lock);
+    unlock_cell(i_pos, j_pos);
 
     while (pthread_mutex_lock(&running_lock), running) {
         pthread_mutex_unlock(&running_lock);
@@ -64,9 +89,9 @@ void *ant_main(void *arg)
             } else if (state == REPR_FOODANT) {
                 state = REPR_FOODSLEEPANT;
             }
-            pthread_mutex_lock(&grid_lock);
+            lock_cell(i_pos, j_pos);
             putCharTo(i_pos, j_pos, state);
-            pthread_mutex_unlock(&grid_lock);
+            unlock_cell(i_pos, j_pos);
         }
         while (getSleeperN() > id) {
             pthread_cond_wait(&sleeper_cond, &sleeper_lock);
@@ -76,14 +101,14 @@ void *ant_main(void *arg)
         /* After a possible sleep */
         if (state == REPR_SLEEPANT) {
             state = REPR_ANT;
-            pthread_mutex_lock(&grid_lock);
+            lock_cell(i_pos, j_pos);
             putCharTo(i_pos, j_pos, state);
-            pthread_mutex_unlock(&grid_lock);
+            unlock_cell(i_pos, j_pos);
         } else if (state == REPR_FOODSLEEPANT) {
             state = REPR_FOODANT;
-            pthread_mutex_lock(&grid_lock);
+            lock_cell(i_pos, j_pos);
             putCharTo(i_pos, j_pos, state);
-            pthread_mutex_unlock(&grid_lock);
+            unlock_cell(i_pos, j_pos);
         } else {
             assert(state == REPR_ANT);
         }
