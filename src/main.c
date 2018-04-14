@@ -3,11 +3,31 @@
 #include <assert.h>
 #include <curses.h>
 #include <pthread.h>
-#include <semaphore.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
+
+/* Mutex protecting the number of sleepers,
+ * i.e. the functions getSleeperN() and setSleeperN().
+ */
+pthread_mutex_t sleeper_mutex = PTHREAD_MUTEX_INITIALIZER;
+/* Condition variable for the sleepers.
+ * It must be broadcast (not signal) since there may be several threads waiting
+ * on it but only a specific one, the one with the proper id, can continue.
+ */
+pthread_cond_t sleeper_cond = PTHREAD_COND_INITIALIZER;
+
+/* Checks the number of sleepers against the id, sleeps if necessary.
+ */
+void ant_sleep(int id)
+{
+    pthread_mutex_lock(&sleeper_mutex);
+    while (getSleeperN() > id) {
+        pthread_cond_wait(&sleeper_cond, &sleeper_mutex);
+    }
+    pthread_mutex_unlock(&sleeper_mutex);
+}
 
 void *ant_main(void *arg)
 {
@@ -15,6 +35,7 @@ void *ant_main(void *arg)
     free(arg);
 
     for (;;) {
+        ant_sleep(id);
         pthread_testcancel();
     }
 
