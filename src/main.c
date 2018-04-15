@@ -36,9 +36,16 @@ static pthread_mutex_t grid_lock = PTHREAD_MUTEX_INITIALIZER;
  */
 static pthread_mutex_t running_lock = PTHREAD_MUTEX_INITIALIZER;
 static int running = 1;
-
-/* TODO: Actually implement cell based locking
+/* Locks for individual cells. Same size as the grid, stored in row-major order.
+ * Allocated and initialized by ants_create(), free'd by ants_stop_join().
  */
+static pthread_mutex_t *cell_locks;
+/* Number of locked cells and its mutex.
+ * Required to implement the Lightswitch pattern, see Downey for details.
+ */
+static pthread_mutex_t cells_locked_lock = PTHREAD_MUTEX_INITIALIZER;
+static int cells_locked;
+
 /* Lock the cell at the given position. If this is the first cell to be locked,
  * also block the main thread from doing a whole grid access (i.e. drawWindow()).
  * Other cells can still be locked independently.
@@ -47,9 +54,18 @@ static int running = 1;
  */
 static void lock_cell(int i, int j)
 {
-    (void)i;
-    (void)j;
-    pthread_mutex_lock(&grid_lock);
+    /* Lightswitch pattern, lock phase */
+    pthread_mutex_lock(&cells_locked_lock);
+    if (++cells_locked == 1) {
+        /* First in locks. This lock will prevent the main thread from
+         * locking the grid while an ant thread holds a cell lock and an ant
+         * thread from locking a cell while the main thread holds the grid lock.
+         */
+        pthread_mutex_lock(&grid_lock);
+    }
+    pthread_mutex_unlock(&cells_locked_lock);
+
+    pthread_mutex_lock(&cell_locks[i*GRIDSIZE + j]);
 }
 
 /* Unlock the cell at the given position.
@@ -58,9 +74,17 @@ static void lock_cell(int i, int j)
  */
 static void unlock_cell(int i, int j)
 {
-    (void)i;
-    (void)j;
-    pthread_mutex_unlock(&grid_lock);
+    /* Lightswitch pattern, unlock phase */
+    pthread_mutex_lock(&cells_locked_lock);
+    if (--cells_locked == 0) {
+        /* Last out unlocks */
+        pthread_mutex_unlock(&grid_lock);
+    }
+    pthread_mutex_unlock(&cells_locked_lock);
+    /* XXX: Should this be here or above the Lightswitch,
+     * or does it even matter?
+     */
+    pthread_mutex_unlock(&cell_locks[i*GRIDSIZE + j]);
 }
 
 void *ant_main(void *arg)
@@ -114,8 +138,13 @@ void *ant_main(void *arg)
         } else {
             assert(state == REPR_ANT);
         }
+        assert(state == REPR_ANT || state == REPR_FOODANT);
 
-        /* TODO: Movement logic */
+        if (state == REPR_ANT) {
+
+        } else /* if (state == REPR_FOODANT) */ {
+
+        }
 
         pthread_mutex_lock(&delay_lock);
         int delay = getDelay();
@@ -132,10 +161,22 @@ static void print_usage(char **argv)
     fprintf(stderr, "Usage: %s n_ants n_food max_seconds\n", argv[0]);
 }
 
+/* Allocate and initialize cell locks and create the ant threads.
+ * If we happen to need any more resources for the ant threads in the future,
+ * also allocate them here.
+ */
 static pthread_t *ants_create(int n_ants)
 {
     int i;
     pthread_t *threads = malloc(n_ants * sizeof *threads);
+
+    /* Allocate and initialize the cell locks. */
+    cell_locks = malloc(GRIDSIZE * GRIDSIZE * sizeof *cell_locks);
+    for (i = 0; i < GRIDSIZE * GRIDSIZE; i++) {
+        pthread_mutex_init(&cell_locks[i], NULL);
+    }
+
+    /* Create the threads */
     for (i = 0; i < n_ants; i++) {
         /* If we pass &i, threads may get the wrong value if the loop
          * goes on before they read *i. So we pass a copy of each i.
@@ -153,7 +194,8 @@ static pthread_t *ants_create(int n_ants)
 
 /* Ant threads live for the lifetime of the program.
  * Before freeing global resources, we should stop and join them.
- * This function stops and joins the threads in the given array.
+ * This function stops and joins the threads in the given array,
+ * and it frees other resources (if there are any) allocated by ants_create().
  */
 static void ants_stop_join(pthread_t *threads, int n_ants)
 {
@@ -174,6 +216,7 @@ static void ants_stop_join(pthread_t *threads, int n_ants)
         }
     }
     free(threads);
+    free(cell_locks);
 }
 
 int main(int argc, char **argv)
