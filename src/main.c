@@ -28,9 +28,6 @@ static pthread_mutex_t delay_lock = PTHREAD_MUTEX_INITIALIZER;
  * on it but only a specific one, the one with the proper id, can continue.
  */
 static pthread_cond_t sleeper_cond = PTHREAD_COND_INITIALIZER;
-/* Global grid lock. Will implement finer-grained locking later.
- */
-static pthread_mutex_t grid_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Variable that signals the threads to continue or stop and the
  * mutex to protect it.
  */
@@ -40,6 +37,11 @@ static int running = 1;
  * Allocated and initialized by ants_create(), free'd by ants_stop_join().
  */
 static pthread_mutex_t *cell_locks;
+/* Global grid lock.
+ * XXX: This cannot be a mutex, since it will be locked from a thread then
+ * later be unlocked by another thread. Make this a semaphore.
+ */
+static pthread_mutex_t grid_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Number of locked cells and its mutex.
  * Required to implement the Lightswitch pattern, see Downey for details.
  */
