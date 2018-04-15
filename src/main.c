@@ -207,7 +207,21 @@ void *ant_main(void *arg)
         }
         assert(state_is_awake(state));
 
+        /* TODO: Figure out if the Helgrind lock order error is a serious matter.
+         * Read the manual:
+         * (http://valgrind.org/docs/manual/hg-manual.html#hg-manual.lock-orders).
+         * I guess we get those errors because the ants move around and they can
+         * and *will* take locks in random orders all the time. If the error
+         * is caused by not consistently acquiring locks in the same order as the first
+         * time they are acquired, the errors are benign; our logic requires that,
+         * and we (hopefully) are in control. I suppose this will not be the
+         * source of a deadlock or else, so suppress the errors.
+         */
         if (state == STATE_ANT) {
+            /* TODO: Fix this convoluted mess. Make these stuff into functions.
+             * I guess the find and lock mechanism can be parametrized and made
+             * into a function, think about it.
+             */
             /* Check da hood for da food */
             int i, j;
             int i_check, j_check;
@@ -229,7 +243,7 @@ void *ant_main(void *arg)
                 }
             }
             if (found_food) {
-                /* We are still holding the cell lock for (i_check, j_check) */
+                /* We are holding the cell lock for (i_check, j_check) */
                 lock_cell(i_pos, j_pos);
                 putCharTo(i_pos, j_pos, REPR_EMPTY);
                 unlock_cell(i_pos, j_pos);
@@ -239,7 +253,38 @@ void *ant_main(void *arg)
                 i_pos = i_check;
                 j_pos = j_check;
             } else {
-                /* TODO: Implement random movement */
+                /* TODO: Select direction randomly.
+                 * Currently the movement is deterministic in the sense that
+                 * the first empty cell to be found is selected.
+                 */
+                /* No lock is held in this case */
+                int found_empty = 0;
+                for (i = -1; i <= 1 && !found_empty; i++) {
+                    for (j = -1; j <= 1 && !found_empty; j++) {
+                        i_check = i_pos + i;
+                        j_check = j_pos + j;
+                        if ((i == 0 && j == 0) || i_check < 0 || j_check < 0 ||
+                                i_check >= GRIDSIZE || j_check >= GRIDSIZE) {
+                            continue;
+                        }
+                        lock_cell(i_check, j_check);
+                        if (lookCharAt(i_check, j_check) == REPR_EMPTY) {
+                            found_empty = 1;
+                        } else {
+                            unlock_cell(i_check, j_check);
+                        }
+                    }
+                }
+                if (found_empty) {
+                    /* We are holding the cell lock for (i_check, j_check) */
+                    lock_cell(i_pos, j_pos);
+                    putCharTo(i_pos, j_pos, REPR_EMPTY);
+                    unlock_cell(i_pos, j_pos);
+                    putCharTo(i_check, j_check, state_to_repr(state));
+                    unlock_cell(i_check, j_check);
+                    i_pos = i_check;
+                    j_pos = j_check;
+                } /* else NOTHING, no lock is held or whatever */
             }
         } else if (state == STATE_FOODANT) {
 
