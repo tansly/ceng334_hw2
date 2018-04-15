@@ -78,6 +78,8 @@ static void lock_cell(int i, int j)
  */
 static void unlock_cell(int i, int j)
 {
+    pthread_mutex_unlock(&cell_locks[i*GRIDSIZE + j]);
+
     /* Lightswitch pattern, unlock phase */
     pthread_mutex_lock(&cells_locked_lock);
     if (--cells_locked == 0) {
@@ -85,10 +87,6 @@ static void unlock_cell(int i, int j)
         semaphore_signal(&grid_available);
     }
     pthread_mutex_unlock(&cells_locked_lock);
-    /* XXX: Should this be here or above the Lightswitch,
-     * or does it even matter?
-     */
-    pthread_mutex_unlock(&cell_locks[i*GRIDSIZE + j]);
 }
 
 void *ant_main(void *arg)
