@@ -14,7 +14,16 @@
 #define REPR_ANT '1'
 #define REPR_FOODANT 'P'
 #define REPR_SLEEPANT 'S'
-#define REPR_FOODSLEEPANT '$'
+#define REPR_SLEEPFOODANT '$'
+
+enum ant_state {
+    STATE_ANT,
+    STATE_FOODANT,
+    STATE_TIREDANT,
+    STATE_SLEEPANT,
+    STATE_SLEEPFOODANT,
+    STATE_SLEEPTIREDANT
+};
 
 /* Mutex protecting the number of sleepers,
  * i.e. the functions getSleeperN() and setSleeperN().
@@ -89,9 +98,76 @@ static void unlock_cell(int i, int j)
     pthread_mutex_unlock(&cells_locked_lock);
 }
 
+static char state_to_repr(enum ant_state state)
+{
+    switch (state) {
+        case STATE_ANT:
+        case STATE_TIREDANT:
+            return REPR_ANT;
+        case STATE_FOODANT:
+            return REPR_FOODANT;
+        case STATE_SLEEPANT:
+        case STATE_SLEEPTIREDANT:
+            return REPR_SLEEPANT;
+        case STATE_SLEEPFOODANT:
+            return REPR_SLEEPFOODANT;
+        default:
+            assert(0);
+            return '\0';
+    }
+}
+
+static int state_is_awake(enum ant_state state)
+{
+    return state == STATE_ANT || state == STATE_FOODANT ||
+                    state == STATE_TIREDANT;
+}
+
+static int state_is_asleep(enum ant_state state)
+{
+    return state == STATE_SLEEPANT || state == STATE_SLEEPFOODANT ||
+                    state == STATE_SLEEPTIREDANT;
+}
+
+static enum ant_state state_wake(enum ant_state state)
+{
+    switch (state) {
+        case STATE_SLEEPANT:
+            return STATE_ANT;
+        case STATE_SLEEPFOODANT:
+            return STATE_FOODANT;
+        case STATE_SLEEPTIREDANT:
+            return STATE_TIREDANT;
+        default:
+            assert(state_is_asleep(state));
+            break;
+    }
+
+    assert(0);
+    return STATE_ANT;
+}
+
+static enum ant_state state_sleep(enum ant_state state)
+{
+    switch (state) {
+        case STATE_ANT:
+            return STATE_SLEEPANT;
+        case STATE_FOODANT:
+            return STATE_SLEEPFOODANT;
+        case STATE_TIREDANT:
+            return STATE_SLEEPTIREDANT;
+        default:
+            assert(state_is_awake(state));
+            break;
+    }
+
+    assert(0);
+    return STATE_SLEEPANT;
+}
+
 void *ant_main(void *arg)
 {
-    char state = REPR_ANT;
+    enum ant_state state = STATE_ANT;
     int i_pos, j_pos;
     int id = *(int*)arg;
     free(arg);
@@ -102,23 +178,19 @@ void *ant_main(void *arg)
             lookCharAt(i_pos, j_pos) != REPR_EMPTY) {
         unlock_cell(i_pos, j_pos);
     }
-    putCharTo(i_pos, j_pos, '1');
+    putCharTo(i_pos, j_pos, state_to_repr(state));
     unlock_cell(i_pos, j_pos);
 
     while (pthread_mutex_lock(&running_lock), running) {
         pthread_mutex_unlock(&running_lock);
 
         /* Check and sleep if necessary. */
+        assert(state_is_awake(state));
         pthread_mutex_lock(&sleeper_lock);
         if (getSleeperN() > id) {
-            assert(state == REPR_ANT || state == REPR_FOODANT);
-            if (state == REPR_ANT) {
-                state = REPR_SLEEPANT;
-            } else if (state == REPR_FOODANT) {
-                state = REPR_FOODSLEEPANT;
-            }
+            state = state_sleep(state);
             lock_cell(i_pos, j_pos);
-            putCharTo(i_pos, j_pos, state);
+            putCharTo(i_pos, j_pos, state_to_repr(state));
             unlock_cell(i_pos, j_pos);
         }
         while (getSleeperN() > id) {
@@ -127,24 +199,19 @@ void *ant_main(void *arg)
         pthread_mutex_unlock(&sleeper_lock);
 
         /* After a possible sleep */
-        if (state == REPR_SLEEPANT) {
-            state = REPR_ANT;
+        if (state_is_asleep(state)) {
+            state = state_wake(state);
             lock_cell(i_pos, j_pos);
-            putCharTo(i_pos, j_pos, state);
+            putCharTo(i_pos, j_pos, state_to_repr(state));
             unlock_cell(i_pos, j_pos);
-        } else if (state == REPR_FOODSLEEPANT) {
-            state = REPR_FOODANT;
-            lock_cell(i_pos, j_pos);
-            putCharTo(i_pos, j_pos, state);
-            unlock_cell(i_pos, j_pos);
-        } else {
-            assert(state == REPR_ANT);
         }
-        assert(state == REPR_ANT || state == REPR_FOODANT);
+        assert(state_is_awake(state));
 
-        if (state == REPR_ANT) {
+        if (state == STATE_ANT) {
 
-        } else /* if (state == REPR_FOODANT) */ {
+        } else if (state == STATE_FOODANT) {
+
+        } else /* if (state == STATE_TIREDANT) */ {
 
         }
 
