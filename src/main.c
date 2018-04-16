@@ -306,13 +306,12 @@ void *ant_main(void *arg)
          * and we (hopefully) are in control. I suppose this will not be the
          * source of a deadlock or else, so suppress the errors.
          */
+        int valid_neighbours = fill_neighbours(curr_pos, neighbours_pos);
+        shuffle_array(neighbours_pos, ARRAY_SIZE(neighbours_pos));
         if (state == STATE_ANT) {
-            int valid_neighbours = fill_neighbours(curr_pos, neighbours_pos);
-            shuffle_array(neighbours_pos, ARRAY_SIZE(neighbours_pos));
             struct coordinate found_pos;
             /* Check da hood for da food */
-            if (find_and_lock(neighbours_pos, valid_neighbours, REPR_FOOD,
-                        &found_pos)) {
+            if (find_and_lock(neighbours_pos, valid_neighbours, REPR_FOOD, &found_pos)) {
                 lock_cell(curr_pos.x, curr_pos.y);
                 putCharTo(curr_pos.x, curr_pos.y, REPR_EMPTY);
                 unlock_cell(curr_pos.x, curr_pos.y);
@@ -320,19 +319,48 @@ void *ant_main(void *arg)
                 putCharTo(found_pos.x, found_pos.y, state_to_repr(state));
                 unlock_cell(found_pos.x, found_pos.y);
                 curr_pos = found_pos;
-            } else if (find_and_lock(neighbours_pos, valid_neighbours, REPR_EMPTY,
-                        &found_pos)) {
+            } else if (find_and_lock(neighbours_pos, valid_neighbours, REPR_EMPTY, &found_pos)) {
                 lock_cell(curr_pos.x, curr_pos.y);
                 putCharTo(curr_pos.x, curr_pos.y, REPR_EMPTY);
                 unlock_cell(curr_pos.x, curr_pos.y);
                 putCharTo(found_pos.x, found_pos.y, state_to_repr(state));
                 unlock_cell(found_pos.x, found_pos.y);
                 curr_pos = found_pos;
-            }
+            } /* else no food and no empty positions, do nothing */
         } else if (state == STATE_FOODANT) {
-
+            struct coordinate found_food_pos;
+            struct coordinate found_empty_pos;
+            /* Check da hood for da food */
+            if (find_and_lock(neighbours_pos, valid_neighbours, REPR_FOOD, &found_food_pos)) {
+                if (find_and_lock(neighbours_pos, valid_neighbours - 1, REPR_EMPTY, &found_empty_pos)) {
+                    lock_cell(curr_pos.x, curr_pos.y);
+                    putCharTo(curr_pos.x, curr_pos.y, REPR_FOOD);
+                    unlock_cell(curr_pos.x, curr_pos.y);
+                    state = STATE_TIREDANT;
+                    putCharTo(found_empty_pos.x, found_empty_pos.y, state_to_repr(state));
+                    unlock_cell(found_empty_pos.x, found_empty_pos.y);
+                    curr_pos = found_empty_pos;
+                }
+                unlock_cell(found_food_pos.x, found_food_pos.y);
+            } else if (find_and_lock(neighbours_pos, valid_neighbours, REPR_EMPTY, &found_empty_pos)) {
+                lock_cell(curr_pos.x, curr_pos.y);
+                putCharTo(curr_pos.x, curr_pos.y, REPR_EMPTY);
+                unlock_cell(curr_pos.x, curr_pos.y);
+                putCharTo(found_empty_pos.x, found_empty_pos.y, state_to_repr(state));
+                unlock_cell(found_empty_pos.x, found_empty_pos.y);
+                curr_pos = found_empty_pos;
+            }
         } else /* if (state == STATE_TIREDANT) */ {
-
+            struct coordinate found_pos;
+            if (find_and_lock(neighbours_pos, valid_neighbours, REPR_EMPTY, &found_pos)) {
+                lock_cell(curr_pos.x, curr_pos.y);
+                putCharTo(curr_pos.x, curr_pos.y, REPR_EMPTY);
+                unlock_cell(curr_pos.x, curr_pos.y);
+                state = STATE_ANT;
+                putCharTo(found_pos.x, found_pos.y, state_to_repr(state));
+                unlock_cell(found_pos.x, found_pos.y);
+                curr_pos = found_pos;
+            }
         }
 
         pthread_mutex_lock(&delay_lock);
