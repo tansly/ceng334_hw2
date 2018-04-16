@@ -66,6 +66,11 @@ static struct semaphore grid_available;
 static pthread_mutex_t cells_locked_lock = PTHREAD_MUTEX_INITIALIZER;
 static int cells_locked;
 
+/* TODO: Current implementation of the cell locking mechanism may starve the
+ * main thread (at least in theory?). Check if this is a problem and if it is,
+ * prevent the starvation.
+ */
+
 /* Lock the cell at the given position. If this is the first cell to be locked,
  * also block the main thread from doing a whole grid access (i.e. drawWindow()).
  * Other cells can still be locked independently.
