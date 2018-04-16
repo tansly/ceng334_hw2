@@ -129,6 +129,10 @@ static int state_is_asleep(enum ant_state state)
                     state == STATE_SLEEPTIREDANT;
 }
 
+/* Returns the awake counterpart of state.
+ * Behaviour is undefined if state is not a valid sleeping state,
+ * i.e. state_is_asleep(state) == false.
+ */
 static enum ant_state state_wake(enum ant_state state)
 {
     switch (state) {
@@ -147,6 +151,10 @@ static enum ant_state state_wake(enum ant_state state)
     return STATE_ANT;
 }
 
+/* Returns the sleeping counterpart of state.
+ * Behaviour is undefined if state is not a valid awake state,
+ * i.e. state_is_awake(state) is false.
+ */
 static enum ant_state state_sleep(enum ant_state state)
 {
     switch (state) {
