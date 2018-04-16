@@ -215,18 +215,18 @@ static int find_and_lock(struct coordinate *check_pos, int valid_n, char needle,
 void *ant_main(void *arg)
 {
     enum ant_state state = STATE_ANT;
-    int i_pos, j_pos;
+    struct coordinate curr_pos;
     int id = *(int*)arg;
     free(arg);
 
     /* Find somewhere to sit. */
-    while (i_pos = rand() % GRIDSIZE, j_pos = rand() % GRIDSIZE,
-            lock_cell(i_pos, j_pos),
-            lookCharAt(i_pos, j_pos) != REPR_EMPTY) {
-        unlock_cell(i_pos, j_pos);
+    while (curr_pos.x = rand() % GRIDSIZE, curr_pos.y = rand() % GRIDSIZE,
+            lock_cell(curr_pos.x, curr_pos.y),
+            lookCharAt(curr_pos.x, curr_pos.y) != REPR_EMPTY) {
+        unlock_cell(curr_pos.x, curr_pos.y);
     }
-    putCharTo(i_pos, j_pos, state_to_repr(state));
-    unlock_cell(i_pos, j_pos);
+    putCharTo(curr_pos.x, curr_pos.y, state_to_repr(state));
+    unlock_cell(curr_pos.x, curr_pos.y);
 
     while (pthread_mutex_lock(&running_lock), running) {
         pthread_mutex_unlock(&running_lock);
@@ -236,9 +236,9 @@ void *ant_main(void *arg)
         pthread_mutex_lock(&sleeper_lock);
         if (getSleeperN() > id) {
             state = state_sleep(state);
-            lock_cell(i_pos, j_pos);
-            putCharTo(i_pos, j_pos, state_to_repr(state));
-            unlock_cell(i_pos, j_pos);
+            lock_cell(curr_pos.x, curr_pos.y);
+            putCharTo(curr_pos.x, curr_pos.y, state_to_repr(state));
+            unlock_cell(curr_pos.x, curr_pos.y);
         }
         while (getSleeperN() > id) {
             pthread_cond_wait(&sleeper_cond, &sleeper_lock);
@@ -248,9 +248,9 @@ void *ant_main(void *arg)
         /* After a possible sleep */
         if (state_is_asleep(state)) {
             state = state_wake(state);
-            lock_cell(i_pos, j_pos);
-            putCharTo(i_pos, j_pos, state_to_repr(state));
-            unlock_cell(i_pos, j_pos);
+            lock_cell(curr_pos.x, curr_pos.y);
+            putCharTo(curr_pos.x, curr_pos.y, state_to_repr(state));
+            unlock_cell(curr_pos.x, curr_pos.y);
         }
         assert(state_is_awake(state));
 
@@ -270,6 +270,8 @@ void *ant_main(void *arg)
              * into a function, think about it.
              */
             /* Check da hood for da food */
+            
+#if 0
             int i, j;
             int i_check, j_check;
             int found_food = 0;
@@ -333,6 +335,7 @@ void *ant_main(void *arg)
                     j_pos = j_check;
                 } /* else NOTHING, no lock is held or whatever */
             }
+#endif
         } else if (state == STATE_FOODANT) {
 
         } else /* if (state == STATE_TIREDANT) */ {
