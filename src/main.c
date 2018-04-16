@@ -66,6 +66,10 @@ static struct semaphore grid_available = SEMAPHORE_INITIALIZER(1);
 static pthread_mutex_t cells_locked_lock = PTHREAD_MUTEX_INITIALIZER;
 static int cells_locked;
 
+/* TODO: The current mechanism leads to a saddening deadlock.
+ * Fix this before anything else.
+ */
+
 /* TODO: Current implementation of the cell locking mechanism may starve the
  * main thread (at least in theory?). Check if this is a problem and if it is,
  * prevent the starvation.
