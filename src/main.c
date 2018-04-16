@@ -25,6 +25,11 @@ enum ant_state {
     STATE_SLEEPTIREDANT
 };
 
+struct coordinate {
+    int x;
+    int y;
+};
+
 /* Mutex protecting the number of sleepers,
  * i.e. the functions getSleeperN() and setSleeperN().
  */
@@ -171,6 +176,40 @@ static enum ant_state state_sleep(enum ant_state state)
 
     assert(0);
     return STATE_SLEEPANT;
+}
+
+/* Search for the needle in the given array of coordinates. Given array may have
+ * invalidated entries, with the coordinates set to -1; however, it must contain
+ * at least valid_n valid entries. Given coordinates are locked and checked for
+ * a match in the given order until the needle is found or valid_n number of
+ * entries are checked. On the first match found, true is returned and the matching
+ * coordinate is "moved" into *found_pos (the entry is copied into *found_pos
+ * and the original one in check_pos is invalidated).
+ * The lock for the matching coordinate is kept locked on return.
+ * Only the lock for the matching coordinate (one returned in found_pos)
+ * is held on return; if no match is found, no locks are kept held and the value of
+ * found_pos is undefined.
+ * The calling thread must not be holding any locks for the given coordinates.
+ */
+static int find_and_lock(struct coordinate *check_pos, int valid_n, char needle,
+        struct coordinate *found_pos)
+{
+    int checked = 0;
+    while (checked < valid_n) {
+        if (check_pos->x != -1) {
+            lock_cell(check_pos->x, check_pos->y);
+            if (lookCharAt(check_pos->x, check_pos->y) == needle) {
+                *found_pos = *check_pos;
+                check_pos->x = check_pos->y = -1;
+                return 1;
+            }
+            unlock_cell(check_pos->x, check_pos->y);
+
+            checked++;
+        }
+        check_pos++;
+    }
+    return 0;
 }
 
 void *ant_main(void *arg)
