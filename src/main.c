@@ -36,15 +36,15 @@ struct coordinate {
  * i.e. the functions getSleeperN() and setSleeperN().
  */
 static pthread_mutex_t sleeper_lock = PTHREAD_MUTEX_INITIALIZER;
-/* Mutex protecting the delay value,
- * i.e the functions getDelay() and setDelay()
- */
-static pthread_mutex_t delay_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Condition variable for the sleepers.
  * It must be broadcast (not signal) since there may be several threads waiting
  * on it but only a specific one, the one with the proper id, can continue.
  */
 static pthread_cond_t sleeper_cond = PTHREAD_COND_INITIALIZER;
+/* Mutex protecting the delay value,
+ * i.e the functions getDelay() and setDelay()
+ */
+static pthread_mutex_t delay_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Variable that signals the threads to continue or stop and the
  * mutex to protect it.
  */
@@ -65,6 +65,9 @@ static struct semaphore grid_available = SEMAPHORE_INITIALIZER(1);
  */
 static pthread_mutex_t cells_locked_lock = PTHREAD_MUTEX_INITIALIZER;
 static int cells_locked;
+/* Turnstile to prevent starvation of the main thread
+ */
+static struct semaphore turnstile = SEMAPHORE_INITIALIZER(1);
 
 /* Lock the cell at the given position. If this is the first cell to be locked,
  * also block the main thread from doing a whole grid access (i.e. drawWindow()).
@@ -308,6 +311,8 @@ void *ant_main(void *arg)
          */
         int valid_neighbours = fill_neighbours(curr_pos, neighbours_pos);
         shuffle_array(neighbours_pos, ARRAY_SIZE(neighbours_pos));
+        semaphore_wait(&turnstile);
+        semaphore_signal(&turnstile);
         if (state == STATE_ANT) {
             struct coordinate found_pos;
             /* Check da hood for da food */
@@ -492,8 +497,10 @@ int main(int argc, char **argv)
             difftime(curr_time, start_time) < max_seconds;
             curr_time = time(NULL)) {
 
+        semaphore_wait(&turnstile);
         semaphore_wait(&grid_available);
         drawWindow();
+        semaphore_signal(&turnstile);
         semaphore_signal(&grid_available);
 
         int c = getch();
