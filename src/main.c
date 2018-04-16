@@ -9,6 +9,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+
 #define REPR_EMPTY '-'
 #define REPR_FOOD 'o'
 #define REPR_ANT '1'
@@ -23,6 +25,11 @@ enum ant_state {
     STATE_SLEEPANT,
     STATE_SLEEPFOODANT,
     STATE_SLEEPTIREDANT
+};
+
+struct coordinate {
+    int x;
+    int y;
 };
 
 /* Mutex protecting the number of sleepers,
@@ -173,21 +180,95 @@ static enum ant_state state_sleep(enum ant_state state)
     return STATE_SLEEPANT;
 }
 
+/* Search for the needle in the given array of coordinates. Given array may have
+ * invalidated entries, with the coordinates set to -1; however, it must contain
+ * at least valid_n valid entries. Given coordinates are locked and checked for
+ * a match in the given order until the needle is found or valid_n number of
+ * entries are checked. On the first match found, true is returned and the matching
+ * coordinate is "moved" into *found_pos (the entry is copied into *found_pos
+ * and the original one in check_pos is invalidated).
+ * The lock for the matching coordinate is kept locked on return.
+ * Only the lock for the matching coordinate (one returned in found_pos)
+ * is held on return; if no match is found, no locks are kept held, the value of
+ * found_pos is undefined and the array is not modified.
+ * The calling thread must not be holding any locks for the given coordinates.
+ */
+static int find_and_lock(struct coordinate *check_pos, int valid_n, char needle,
+        struct coordinate *found_pos)
+{
+    int checked = 0;
+    while (checked < valid_n) {
+        if (check_pos->x != -1) {
+            lock_cell(check_pos->x, check_pos->y);
+            if (lookCharAt(check_pos->x, check_pos->y) == needle) {
+                *found_pos = *check_pos;
+                check_pos->x = check_pos->y = -1;
+                return 1;
+            }
+            unlock_cell(check_pos->x, check_pos->y);
+
+            checked++;
+        }
+        check_pos++;
+    }
+    return 0;
+}
+
+static void shuffle_array(struct coordinate *array, int n)
+{
+    int i;
+    for (i = n - 1; i >= 1; i--) {
+        int j = rand() % (i + 1);
+        struct coordinate tmp = array[j];
+        array[j] = array[i];
+        array[i] = tmp;
+    }
+}
+
+/* Fills the array with neighbour coordinates,
+ * returns the number of valid coordinates.
+ * Array length must be at least 8.
+ */
+static int fill_neighbours(struct coordinate pos, struct coordinate *neighbours)
+{
+    int valid = 0;
+    int x, y;
+    for (x = -1; x <= 1; x++) {
+        for (y = -1; y <= 1; y++) {
+            if (x == 0 && y == 0) {
+                continue;
+            }
+
+            struct coordinate check = { pos.x + x, pos.y + y };
+            if (check.x < 0 || check.y < 0 || check.x >= GRIDSIZE ||
+                    check.y >= GRIDSIZE) {
+                struct coordinate invalid = { -1, -1 };
+                *neighbours++ = invalid;
+            } else {
+                *neighbours++ = check;
+                valid++;
+            }
+        }
+    }
+    return valid;
+}
+
 void *ant_main(void *arg)
 {
     enum ant_state state = STATE_ANT;
-    int i_pos, j_pos;
+    struct coordinate curr_pos;
+    struct coordinate neighbours_pos[8]; /* 8 neighbours */
     int id = *(int*)arg;
     free(arg);
 
     /* Find somewhere to sit. */
-    while (i_pos = rand() % GRIDSIZE, j_pos = rand() % GRIDSIZE,
-            lock_cell(i_pos, j_pos),
-            lookCharAt(i_pos, j_pos) != REPR_EMPTY) {
-        unlock_cell(i_pos, j_pos);
+    while (curr_pos.x = rand() % GRIDSIZE, curr_pos.y = rand() % GRIDSIZE,
+            lock_cell(curr_pos.x, curr_pos.y),
+            lookCharAt(curr_pos.x, curr_pos.y) != REPR_EMPTY) {
+        unlock_cell(curr_pos.x, curr_pos.y);
     }
-    putCharTo(i_pos, j_pos, state_to_repr(state));
-    unlock_cell(i_pos, j_pos);
+    putCharTo(curr_pos.x, curr_pos.y, state_to_repr(state));
+    unlock_cell(curr_pos.x, curr_pos.y);
 
     while (pthread_mutex_lock(&running_lock), running) {
         pthread_mutex_unlock(&running_lock);
@@ -197,9 +278,9 @@ void *ant_main(void *arg)
         pthread_mutex_lock(&sleeper_lock);
         if (getSleeperN() > id) {
             state = state_sleep(state);
-            lock_cell(i_pos, j_pos);
-            putCharTo(i_pos, j_pos, state_to_repr(state));
-            unlock_cell(i_pos, j_pos);
+            lock_cell(curr_pos.x, curr_pos.y);
+            putCharTo(curr_pos.x, curr_pos.y, state_to_repr(state));
+            unlock_cell(curr_pos.x, curr_pos.y);
         }
         while (getSleeperN() > id) {
             pthread_cond_wait(&sleeper_cond, &sleeper_lock);
@@ -209,9 +290,9 @@ void *ant_main(void *arg)
         /* After a possible sleep */
         if (state_is_asleep(state)) {
             state = state_wake(state);
-            lock_cell(i_pos, j_pos);
-            putCharTo(i_pos, j_pos, state_to_repr(state));
-            unlock_cell(i_pos, j_pos);
+            lock_cell(curr_pos.x, curr_pos.y);
+            putCharTo(curr_pos.x, curr_pos.y, state_to_repr(state));
+            unlock_cell(curr_pos.x, curr_pos.y);
         }
         assert(state_is_awake(state));
 
@@ -226,73 +307,27 @@ void *ant_main(void *arg)
          * source of a deadlock or else, so suppress the errors.
          */
         if (state == STATE_ANT) {
-            /* TODO: Fix this convoluted mess. Make these stuff into functions.
-             * I guess the find and lock mechanism can be parametrized and made
-             * into a function, think about it.
-             */
+            int valid_neighbours = fill_neighbours(curr_pos, neighbours_pos);
+            shuffle_array(neighbours_pos, ARRAY_SIZE(neighbours_pos));
+            struct coordinate found_pos;
             /* Check da hood for da food */
-            int i, j;
-            int i_check, j_check;
-            int found_food = 0;
-            for (i = -1; i <= 1 && !found_food; i++) {
-                for (j = -1; j <= 1 && !found_food; j++) {
-                    i_check = i_pos + i;
-                    j_check = j_pos + j;
-                    if ((i == 0 && j == 0) || i_check < 0 || j_check < 0 ||
-                            i_check >= GRIDSIZE || j_check >= GRIDSIZE) {
-                        continue;
-                    }
-                    lock_cell(i_check, j_check);
-                    if (lookCharAt(i_check, j_check) == REPR_FOOD) {
-                        found_food = 1;
-                    } else {
-                        unlock_cell(i_check, j_check);
-                    }
-                }
-            }
-            if (found_food) {
-                /* We are holding the cell lock for (i_check, j_check) */
-                lock_cell(i_pos, j_pos);
-                putCharTo(i_pos, j_pos, REPR_EMPTY);
-                unlock_cell(i_pos, j_pos);
+            if (find_and_lock(neighbours_pos, valid_neighbours, REPR_FOOD,
+                        &found_pos)) {
+                lock_cell(curr_pos.x, curr_pos.y);
+                putCharTo(curr_pos.x, curr_pos.y, REPR_EMPTY);
+                unlock_cell(curr_pos.x, curr_pos.y);
                 state = STATE_FOODANT;
-                putCharTo(i_check, j_check, state_to_repr(state));
-                unlock_cell(i_check, j_check);
-                i_pos = i_check;
-                j_pos = j_check;
-            } else {
-                /* TODO: Select direction randomly.
-                 * Currently the movement is deterministic in the sense that
-                 * the first empty cell to be found is selected.
-                 */
-                /* No lock is held in this case */
-                int found_empty = 0;
-                for (i = -1; i <= 1 && !found_empty; i++) {
-                    for (j = -1; j <= 1 && !found_empty; j++) {
-                        i_check = i_pos + i;
-                        j_check = j_pos + j;
-                        if ((i == 0 && j == 0) || i_check < 0 || j_check < 0 ||
-                                i_check >= GRIDSIZE || j_check >= GRIDSIZE) {
-                            continue;
-                        }
-                        lock_cell(i_check, j_check);
-                        if (lookCharAt(i_check, j_check) == REPR_EMPTY) {
-                            found_empty = 1;
-                        } else {
-                            unlock_cell(i_check, j_check);
-                        }
-                    }
-                }
-                if (found_empty) {
-                    /* We are holding the cell lock for (i_check, j_check) */
-                    lock_cell(i_pos, j_pos);
-                    putCharTo(i_pos, j_pos, REPR_EMPTY);
-                    unlock_cell(i_pos, j_pos);
-                    putCharTo(i_check, j_check, state_to_repr(state));
-                    unlock_cell(i_check, j_check);
-                    i_pos = i_check;
-                    j_pos = j_check;
-                } /* else NOTHING, no lock is held or whatever */
+                putCharTo(found_pos.x, found_pos.y, state_to_repr(state));
+                unlock_cell(found_pos.x, found_pos.y);
+                curr_pos = found_pos;
+            } else if (find_and_lock(neighbours_pos, valid_neighbours, REPR_EMPTY,
+                        &found_pos)) {
+                lock_cell(curr_pos.x, curr_pos.y);
+                putCharTo(curr_pos.x, curr_pos.y, REPR_EMPTY);
+                unlock_cell(curr_pos.x, curr_pos.y);
+                putCharTo(found_pos.x, found_pos.y, state_to_repr(state));
+                unlock_cell(found_pos.x, found_pos.y);
+                curr_pos = found_pos;
             }
         } else if (state == STATE_FOODANT) {
 
