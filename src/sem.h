@@ -10,6 +10,8 @@ struct semaphore {
     int wakeups;
 };
 
+#define SEMAPHORE_INITIALIZER(value) { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, value, 0 }
+
 void semaphore_init(struct semaphore *sem, int value);
 
 void semaphore_wait(struct semaphore *sem);

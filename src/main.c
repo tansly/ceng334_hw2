@@ -52,7 +52,7 @@ static pthread_mutex_t *cell_locks;
  * locking cells, but ant threads will still be able to lock cells independently
  * from each other. Required to implement the Lightswitch pattern.
  */
-static struct semaphore grid_available;
+static struct semaphore grid_available = SEMAPHORE_INITIALIZER(1);
 /* Number of locked cells and its mutex.
  * Required to implement the Lightswitch pattern, see Downey for details.
  */
@@ -244,7 +244,6 @@ static pthread_t *ants_create(int n_ants)
     for (i = 0; i < GRIDSIZE * GRIDSIZE; i++) {
         pthread_mutex_init(&cell_locks[i], NULL);
     }
-    semaphore_init(&grid_available, 1);
 
     /* Create the threads */
     for (i = 0; i < n_ants; i++) {
