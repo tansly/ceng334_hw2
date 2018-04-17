@@ -4,8 +4,8 @@
 #include <assert.h>
 #include <curses.h>
 #include <pthread.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -89,6 +89,31 @@ static void lock_cell(int i, int j)
     pthread_mutex_unlock(&cells_locked_lock);
 
     pthread_mutex_lock(&cell_locks[i*GRIDSIZE + j]);
+}
+
+static int trylock_cell(int i, int j)
+{
+    /* Lightswitch pattern, lock phase */
+    pthread_mutex_lock(&cells_locked_lock);
+    if (++cells_locked == 1) {
+        /* First in locks. This lock will prevent the main thread from
+         * locking the grid while an ant thread holds a cell lock and an ant
+         * thread from locking a cell while the main thread holds the grid lock.
+         */
+        semaphore_wait(&grid_available);
+    }
+    pthread_mutex_unlock(&cells_locked_lock);
+
+    if (pthread_mutex_trylock(&cell_locks[i*GRIDSIZE + j]) != 0) {
+        pthread_mutex_lock(&cells_locked_lock);
+        if (--cells_locked == 0) {
+            semaphore_signal(&grid_available);
+        }
+        pthread_mutex_unlock(&cells_locked_lock);
+        return 0;
+    } else {
+        return 1;
+    }
 }
 
 /* Unlock the cell at the given position.
@@ -217,6 +242,28 @@ static int find_and_lock(struct coordinate *check_pos, int valid_n, char needle,
     return 0;
 }
 
+static int find_and_trylock(struct coordinate *check_pos, int valid_n, char needle,
+        struct coordinate *found_pos)
+{
+    int checked = 0;
+    while (checked < valid_n) {
+        if (check_pos->x != -1) {
+            checked++;
+            if (!trylock_cell(check_pos->x, check_pos->y)) {
+                continue;
+            }
+            if (lookCharAt(check_pos->x, check_pos->y) == needle) {
+                *found_pos = *check_pos;
+                check_pos->x = check_pos->y = -1;
+                return 1;
+            }
+            unlock_cell(check_pos->x, check_pos->y);
+        }
+        check_pos++;
+    }
+    return 0;
+}
+
 static void shuffle_array(struct coordinate *array, int n)
 {
     int i;
@@ -337,10 +384,11 @@ void *ant_main(void *arg)
             struct coordinate found_empty_pos;
             /* Check da hood for da food */
             if (find_and_lock(neighbours_pos, valid_neighbours, REPR_FOOD, &found_food_pos)) {
-                /* FIXME: This section causes a deadlock.
-                 * Can we fix this using trylock and get away?
+                /* XXX: Fixed the deadlock by attacking the no-preemption condition.
+                 * Is there a better way to fix it, and does it even work
+                 * properly now?
                  */
-                if (find_and_lock(neighbours_pos, valid_neighbours - 1, REPR_EMPTY, &found_empty_pos)) {
+                if (find_and_trylock(neighbours_pos, valid_neighbours - 1, REPR_EMPTY, &found_empty_pos)) {
                     lock_cell(curr_pos.x, curr_pos.y);
                     putCharTo(curr_pos.x, curr_pos.y, REPR_FOOD);
                     unlock_cell(curr_pos.x, curr_pos.y);
