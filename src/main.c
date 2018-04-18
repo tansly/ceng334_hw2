@@ -1,3 +1,5 @@
+#define NDEBUG
+
 #include "do_not_submit.h"
 #include "sem.h"
 
