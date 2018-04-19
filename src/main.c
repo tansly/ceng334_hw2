@@ -346,16 +346,6 @@ void *ant_main(void *arg)
         }
         assert(state_is_awake(state));
 
-        /* TODO: Figure out if the Helgrind lock order error is a serious matter.
-         * Read the manual:
-         * (http://valgrind.org/docs/manual/hg-manual.html#hg-manual.lock-orders).
-         * I guess we get those errors because the ants move around and they can
-         * and *will* take locks in random orders all the time. If the error
-         * is caused by not consistently acquiring locks in the same order as the first
-         * time they are acquired, the errors are benign; our logic requires that,
-         * and we (hopefully) are in control. I suppose this will not be the
-         * source of a deadlock or else, so suppress the errors.
-         */
         int valid_neighbours = fill_neighbours(curr_pos, neighbours_pos);
         shuffle_array(neighbours_pos, ARRAY_SIZE(neighbours_pos));
         semaphore_wait(&turnstile);
