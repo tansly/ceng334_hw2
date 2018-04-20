@@ -4,7 +4,6 @@
 #include <curses.h>
 #include <errno.h>
 #include <pthread.h>
-#include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -55,28 +54,8 @@ static int running = 1;
  * Allocated and initialized by ants_create(), free'd by ants_stop_join().
  */
 static pthread_mutex_t *cell_locks;
-/* Semaphore signalling if the grid is available, i.e. not used by any thread.
- * This will block the main thread from entering while there are ant threads
- * locking cells, but ant threads will still be able to lock cells independently
- * from each other. Required to implement the Lightswitch pattern.
- */
-static sem_t grid_available;
-/* Number of locked cells and its mutex.
- * Required to implement the Lightswitch pattern, see Downey for details.
- */
-static pthread_mutex_t cells_locked_lock = PTHREAD_MUTEX_INITIALIZER;
-static int cells_locked;
-/* Turnstile to prevent starvation of the main thread
- */
-static sem_t turnstile;
 
-static int sem_wait_nointr(sem_t *sem)
-{
-    int ret;
-    while ((ret = sem_wait(sem)) == -1 && errno == EINTR)
-        ;
-    return ret;
-}
+static pthread_rwlock_t grid_lock = PTHREAD_RWLOCK_INITIALIZER;
 
 /* Lock the cell at the given position. If this is the first cell to be locked,
  * also block the main thread from doing a whole grid access (i.e. drawWindow()).
@@ -86,39 +65,15 @@ static int sem_wait_nointr(sem_t *sem)
  */
 static void lock_cell(int i, int j)
 {
-    /* Lightswitch pattern, lock phase */
-    pthread_mutex_lock(&cells_locked_lock);
-    if (++cells_locked == 1) {
-        /* First in locks. This lock will prevent the main thread from
-         * locking the grid while an ant thread holds a cell lock and an ant
-         * thread from locking a cell while the main thread holds the grid lock.
-         */
-        sem_wait_nointr(&grid_available);
-    }
-    pthread_mutex_unlock(&cells_locked_lock);
-
+    pthread_rwlock_rdlock(&grid_lock);
     pthread_mutex_lock(&cell_locks[i*GRIDSIZE + j]);
 }
 
 static int trylock_cell(int i, int j)
 {
-    /* Lightswitch pattern, lock phase */
-    pthread_mutex_lock(&cells_locked_lock);
-    if (++cells_locked == 1) {
-        /* First in locks. This lock will prevent the main thread from
-         * locking the grid while an ant thread holds a cell lock and an ant
-         * thread from locking a cell while the main thread holds the grid lock.
-         */
-        sem_wait_nointr(&grid_available);
-    }
-    pthread_mutex_unlock(&cells_locked_lock);
-
+    pthread_rwlock_rdlock(&grid_lock);
     if (pthread_mutex_trylock(&cell_locks[i*GRIDSIZE + j]) != 0) {
-        pthread_mutex_lock(&cells_locked_lock);
-        if (--cells_locked == 0) {
-            sem_post(&grid_available);
-        }
-        pthread_mutex_unlock(&cells_locked_lock);
+        pthread_rwlock_unlock(&grid_lock);
         return 0;
     } else {
         return 1;
@@ -132,14 +87,7 @@ static int trylock_cell(int i, int j)
 static void unlock_cell(int i, int j)
 {
     pthread_mutex_unlock(&cell_locks[i*GRIDSIZE + j]);
-
-    /* Lightswitch pattern, unlock phase */
-    pthread_mutex_lock(&cells_locked_lock);
-    if (--cells_locked == 0) {
-        /* Last out unlocks */
-        sem_post(&grid_available);
-    }
-    pthread_mutex_unlock(&cells_locked_lock);
+    pthread_rwlock_unlock(&grid_lock);
 }
 
 static char state_to_repr(enum ant_state state)
@@ -357,8 +305,6 @@ void *ant_main(void *arg)
 
         int valid_neighbours = fill_neighbours(curr_pos, neighbours_pos);
         shuffle_array(neighbours_pos, ARRAY_SIZE(neighbours_pos));
-        sem_wait_nointr(&turnstile);
-        sem_post(&turnstile);
         if (state == STATE_ANT) {
             struct coordinate found_pos;
             /* Check da hood for da food */
@@ -447,14 +393,6 @@ static pthread_t *ants_create(int n_ants)
     for (i = 0; i < GRIDSIZE * GRIDSIZE; i++) {
         pthread_mutex_init(&cell_locks[i], NULL);
     }
-    if (sem_init(&grid_available, 0, 1) != 0) {
-        perror("ants_create(): sem_init()");
-        exit(EXIT_FAILURE);
-    }
-    if (sem_init(&turnstile, 0, 1) != 0) {
-        perror("ants_create(): sem_init()");
-        exit(EXIT_FAILURE);
-    }
 
     /* Create the threads */
     for (i = 0; i < n_ants; i++) {
@@ -497,8 +435,6 @@ static void ants_stop_join(pthread_t *threads, int n_ants)
     }
     free(threads);
     free(cell_locks);
-    sem_destroy(&grid_available);
-    sem_destroy(&turnstile);
 }
 
 int main(int argc, char **argv)
@@ -554,11 +490,9 @@ int main(int argc, char **argv)
             difftime(curr_time, start_time) < max_seconds;
             curr_time = time(NULL)) {
 
-        sem_wait_nointr(&turnstile);
-        sem_wait_nointr(&grid_available);
+        pthread_rwlock_wrlock(&grid_lock);
         drawWindow();
-        sem_post(&turnstile);
-        sem_post(&grid_available);
+        pthread_rwlock_unlock(&grid_lock);
 
         int c = getch();
         if (c == 'q' || c == ESC) {
