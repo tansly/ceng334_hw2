@@ -1,11 +1,12 @@
 #define NDEBUG
 
 #include "do_not_submit.h"
-#include "sem.h"
 
 #include <assert.h>
 #include <curses.h>
+#include <errno.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -61,7 +62,7 @@ static pthread_mutex_t *cell_locks;
  * locking cells, but ant threads will still be able to lock cells independently
  * from each other. Required to implement the Lightswitch pattern.
  */
-static struct semaphore grid_available = SEMAPHORE_INITIALIZER(1);
+static sem_t grid_available;
 /* Number of locked cells and its mutex.
  * Required to implement the Lightswitch pattern, see Downey for details.
  */
@@ -69,7 +70,15 @@ static pthread_mutex_t cells_locked_lock = PTHREAD_MUTEX_INITIALIZER;
 static int cells_locked;
 /* Turnstile to prevent starvation of the main thread
  */
-static struct semaphore turnstile = SEMAPHORE_INITIALIZER(1);
+static sem_t turnstile;
+
+static int sem_wait_nointr(sem_t *sem)
+{
+    int ret;
+    while ((ret = sem_wait(sem)) == -1 && errno == EINTR)
+        ;
+    return ret;
+}
 
 /* Lock the cell at the given position. If this is the first cell to be locked,
  * also block the main thread from doing a whole grid access (i.e. drawWindow()).
@@ -86,7 +95,7 @@ static void lock_cell(int i, int j)
          * locking the grid while an ant thread holds a cell lock and an ant
          * thread from locking a cell while the main thread holds the grid lock.
          */
-        semaphore_wait(&grid_available);
+        sem_wait_nointr(&grid_available);
     }
     pthread_mutex_unlock(&cells_locked_lock);
 
@@ -102,14 +111,14 @@ static int trylock_cell(int i, int j)
          * locking the grid while an ant thread holds a cell lock and an ant
          * thread from locking a cell while the main thread holds the grid lock.
          */
-        semaphore_wait(&grid_available);
+        sem_wait_nointr(&grid_available);
     }
     pthread_mutex_unlock(&cells_locked_lock);
 
     if (pthread_mutex_trylock(&cell_locks[i*GRIDSIZE + j]) != 0) {
         pthread_mutex_lock(&cells_locked_lock);
         if (--cells_locked == 0) {
-            semaphore_signal(&grid_available);
+            sem_post(&grid_available);
         }
         pthread_mutex_unlock(&cells_locked_lock);
         return 0;
@@ -130,7 +139,7 @@ static void unlock_cell(int i, int j)
     pthread_mutex_lock(&cells_locked_lock);
     if (--cells_locked == 0) {
         /* Last out unlocks */
-        semaphore_signal(&grid_available);
+        sem_post(&grid_available);
     }
     pthread_mutex_unlock(&cells_locked_lock);
 }
@@ -348,20 +357,10 @@ void *ant_main(void *arg)
         }
         assert(state_is_awake(state));
 
-        /* TODO: Figure out if the Helgrind lock order error is a serious matter.
-         * Read the manual:
-         * (http://valgrind.org/docs/manual/hg-manual.html#hg-manual.lock-orders).
-         * I guess we get those errors because the ants move around and they can
-         * and *will* take locks in random orders all the time. If the error
-         * is caused by not consistently acquiring locks in the same order as the first
-         * time they are acquired, the errors are benign; our logic requires that,
-         * and we (hopefully) are in control. I suppose this will not be the
-         * source of a deadlock or else, so suppress the errors.
-         */
         int valid_neighbours = fill_neighbours(curr_pos, neighbours_pos);
         shuffle_array(neighbours_pos, ARRAY_SIZE(neighbours_pos));
-        semaphore_wait(&turnstile);
-        semaphore_signal(&turnstile);
+        sem_wait_nointr(&turnstile);
+        sem_post(&turnstile);
         if (state == STATE_ANT) {
             struct coordinate found_pos;
             /* Check da hood for da food */
@@ -445,10 +444,18 @@ static pthread_t *ants_create(int n_ants)
     int i;
     pthread_t *threads = malloc(n_ants * sizeof *threads);
 
-    /* Allocate and initialize the cell locks and the global grid lock. */
+    /* Allocate and initialize the cell locks and semaphores used.*/
     cell_locks = malloc(GRIDSIZE * GRIDSIZE * sizeof *cell_locks);
     for (i = 0; i < GRIDSIZE * GRIDSIZE; i++) {
         pthread_mutex_init(&cell_locks[i], NULL);
+    }
+    if (sem_init(&grid_available, 0, 1) != 0) {
+        perror("ants_create(): sem_init()");
+        exit(EXIT_FAILURE);
+    }
+    if (sem_init(&turnstile, 0, 1) != 0) {
+        perror("ants_create(): sem_init()");
+        exit(EXIT_FAILURE);
     }
 
     /* Create the threads */
@@ -492,6 +499,8 @@ static void ants_stop_join(pthread_t *threads, int n_ants)
     }
     free(threads);
     free(cell_locks);
+    sem_destroy(&grid_available);
+    sem_destroy(&turnstile);
 }
 
 int main(int argc, char **argv)
@@ -547,11 +556,11 @@ int main(int argc, char **argv)
             difftime(curr_time, start_time) < max_seconds;
             curr_time = time(NULL)) {
 
-        semaphore_wait(&turnstile);
-        semaphore_wait(&grid_available);
+        sem_wait_nointr(&turnstile);
+        sem_wait_nointr(&grid_available);
         drawWindow();
-        semaphore_signal(&turnstile);
-        semaphore_signal(&grid_available);
+        sem_post(&turnstile);
+        sem_post(&grid_available);
 
         int c = getch();
         if (c == 'q' || c == ESC) {
